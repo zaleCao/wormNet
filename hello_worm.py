@@ -29,6 +29,7 @@ def assign_neuro_type():
 
 #determine if a neuron is excitory or inhibitory
 def exin():
+	i = 1.0 
 	for n,nbrs in G.adjacency_iter():
 		NT_types = ['Ach', 'DA', 'GABA', '5-HT']
 		if G.node[n]['neurotransmitters'] == NT_types[0]:
@@ -36,9 +37,14 @@ def exin():
 		elif G.node[n]['neurotransmitters'] == NT_types[1]:
 			G.node[n]['exin'] = 1
 		elif G.node[n]['neurotransmitters'] == NT_types[2]:
+			#10% are labeled inhibitory
 			G.node[n]['exin'] = -1
+			i += 1.0
 		else:
-			G.node[n]['exin'] = 0
+			#63% of nodes are unassigned
+			G.node[n]['exin'] = 1
+	ratio_inhibitory = i / 270.0		
+	return ratio_inhibitory
 
 #initialise all hub nodes to have the parameter activity
 def init_activity_perimeter():
@@ -75,7 +81,7 @@ def init_activity_random():
 	init_active_nodes = 0
 	for n,nbrs in G.adjacency_iter():
 		#randomly activate roughly 30% of nodes
-		if random.random() > 0.5:
+		if random.random() > 0.20:
 			G.node[n]['activity'] = 0
 		else:
 			G.node[n]['activity'] = 100
@@ -92,7 +98,7 @@ def init_refractory():
 
 #pull function to get the current activity of nodes used to visualize color of nodes in graph
 def get_activity():
-	activity_array = range(G.number_of_nodes())
+	activity_array = [0] * G.number_of_nodes()
 	i = 0
 	for n,nbrs in G.adjacency_iter():
 		activity_array[i] = G.node[n]['activity']
@@ -101,33 +107,56 @@ def get_activity():
 
 #create an array of the degree of each node which can be used in visualization for node size
 def node_size_map():
-	size_array = range(G.number_of_nodes())
+	size_array = [0] * G.number_of_nodes()
 	i = 0
 	for n,nbrs in G.adjacency_iter():
 		size_array[i] = G.degree(n) * 5
 		i += 1
 	return size_array
 
+def normalize_synapse_weight():
+	#find maximum weights for each types of synapses
+	max_e_weight = 1
+	max_c_weight = 1
+
+	for n,nbrs in G.adjacency_iter():
+		for nbr,eattr in nbrs.items():
+			for attr, data in eattr.items():
+				if data['synapse_type'] == 'E':
+					if data['weight'] > max_e_weight:
+						max_e_weight = data['weight']
+				if data['synapse_type'] == 'C':	
+					if data['weight'] > max_c_weight:
+						max_c_weight = data['weight']
+	#normalize for each synapse
+	for n,nbrs in G.adjacency_iter():
+		for nbr,eattr in nbrs.items():
+			for attr, data in eattr.items():
+				if data['synapse_type'] == 'E':
+					data['normal_weight'] = data['weight'] / max_e_weight
+				if data['synapse_type'] == 'C':
+					data['normal_weight'] = data['weight'] / max_c_weight	
+
+
+
+
 #interate over all nodes to propogate neural activity
 def single_time_step(node_sizes):
-	integral= range(G.number_of_nodes())
+	integral= [0] * G.number_of_nodes()
 	m = 0
 	for n,nbrs in G.adjacency_iter():
 		#check if the node is active
-		activity_array = range(G.number_of_nodes())
-		i = 0
 
 		#decay of activity of activated neuron in 2 time steps
 		if G.node[n]['activity'] > 0:
 			#an activated node will be activated for 2 timesteps
 			G.node[n]['activity'] -= 50 
-			#size_array[i] = G.degree(n) * 5
-			i += 1
 
+			current_activity = G.node[n]['activity']
 			#set refractory period if activity of the node just ended
-			if G.node[n]['activity'] == 0:
+			if current_activity == 0:
 				#refactory period takes 3 time steps to end
-				G.node[n]['refractory'] = 3
+				G.node[n]['refractory'] = 1
 
 		#if the node is in the refactory period reduce its count	
 		elif G.node[n]['refractory'] > 0:
@@ -142,14 +171,15 @@ def single_time_step(node_sizes):
 					#'E' for electrical synapse
 					if data['synapse_type'] == 'E':
 						#summing the activity input into a node and store integral into a list
-						integral[m] +=  G.node[nbr]['exin'] * G.node[nbr]['activity'] * data['weight']
-			if integral[m] > 15:
+						integral[m] +=  G.node[nbr]['exin'] * G.node[nbr]['activity'] * data['normal_weight']
+			#this threshold activation limit is chosen based on the proportion of neuron action potential			
+			if integral[m] > 2:
 				G.node[n]['activity'] = 100
 		#for tracking the integral list		
-		m += 1		
+		m += 1
 
 	print get_activity()
-	return integral
+	print integral
 
 #main function for time iteration that contain all smaller functions
 def time_itr(time):
@@ -157,6 +187,7 @@ def time_itr(time):
 	exin()
 	init_activity_random()
 	init_refractory()
+	normalize_synapse_weight()
 	node_sizes = node_size_map()
 	for i in range(time):
 		#figure perimeter set up
@@ -165,13 +196,18 @@ def time_itr(time):
 		#n_colors=range(279)
 		#e_colors=range(3225)
 		#draw graphs so propogation can be seen in real time
-		nx.draw(G,pos, node_color=get_activity(), node_size=node_sizes, width=1, style='dotted', arrows=False, cmap=plt.cm.Blues)
 		#nx.draw_spectral(G)
-		plt.savefig("img/step" + str(i) + ".png")
+		nx.draw(G,pos, node_color=get_activity(), node_size=node_sizes, width=1, style='dotted', arrows=False, cmap=plt.cm.Blues)
+		plt.savefig("img/step_n1_" + str(i) + ".png")
+
+		#nx.draw_circular(G, node_color=get_activity(), node_size=node_sizes, width=1, style='dotted', arrows=False, cmap=plt.cm.Blues)
+
+		#plt.savefig("img/step_cr3_" + str(i) + ".png")
 		#plt.show()
 		single_time_step(node_sizes)
 
 #importing the wormNet data from graphml file
+
 
 
 if __name__ == "__main__":
@@ -187,7 +223,7 @@ if __name__ == "__main__":
 	#Global positioning of nodes
 	pos = graphviz_layout(G, prog='sfdp', args='')
 
-	time_itr(5)
+	time_itr(20)
 
 
 	# figure setup
